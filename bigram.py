@@ -9,6 +9,7 @@ EVAL_INTERVAL = 300
 LEARNING_RATE = 1e-2
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 EVAL_ITERS = 200
+N_EMBED = 32
 
 torch.manual_seed(1337)
 
@@ -38,12 +39,19 @@ def get_batch(split):
     return x,y
 
 class BigramLanguageModel(nn.Module):
-    def __init__(self, vocab_size):
+    def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+        self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
+        self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
+        self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
     def forward(self, idx, targets=None):
-        logits = self.token_embedding_table(idx)
+        B, T = idx.shape
+
+        tok_emb = self.token_embedding_table(idx)
+        pos_emb = self.position_embedding_table(torch.arange(T, device=DEVICE))
+        x = tok_emb + pos_emb
+        logits = self.lm_head(x)
 
         if targets is not None:
             B, T, C = logits.shape
@@ -65,7 +73,7 @@ class BigramLanguageModel(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
         return idx
     
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(DEVICE)
 optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
