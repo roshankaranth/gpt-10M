@@ -58,8 +58,14 @@ class head(nn.Module):
 
         v = self.value(x)
         return wei @ v
+    
+class MultipleSelfAttentionHead(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([head(head_size) for _ in range(num_heads)])
 
-
+    def forward(self,x):
+        return torch.cat([h(x) for h in self.heads], dim=-1)
 
 class BigramLanguageModel(nn.Module):
     def __init__(self):
@@ -67,7 +73,7 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
-        self.sa_head = head(N_EMBED)
+        self.sa_head = MultipleSelfAttentionHead(4, N_EMBED//4)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
