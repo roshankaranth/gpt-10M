@@ -4,9 +4,9 @@ from torch.nn import functional as F
 
 BATCH_SIZE = 32
 BLOCK_SIZE = 8
-MAX_ITERS = 3000
+MAX_ITERS = 5000
 EVAL_INTERVAL = 300
-LEARNING_RATE = 1e-2
+LEARNING_RATE = 1e-3
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 EVAL_ITERS = 200
 N_EMBED = 32
@@ -38,12 +38,36 @@ def get_batch(split):
     x , y = x.to(DEVICE), y.to(DEVICE)
     return x,y
 
+class head(nn.Module):
+    """one head of self attention"""
+    def __init__(self, head_size):
+        super().__init__()
+        self.key = nn.Linear(N_EMBED, head_size, bias=False)
+        self.query = nn.Linear(N_EMBED, head_size, bias = False)
+        self.value = nn.Linear(N_EMBED, head_size, bias = False)
+        self.register_buffer('tril', torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
+
+    def forward(self, x):
+        B,T,C = x.shape
+        k = self.key(x) # (B,T,head_size)
+        q = self.query(x) # (B,T,head_size)
+
+        wei  = q @ k.transpose(-2,-1) * C**-0.5
+        wei = torch.masked_fill(wei, self.tril[:T, :T] == 0, float('-inf'))
+        wei = F.softmax(wei, dim=-1)
+
+        v = self.value(x)
+        return wei @ v
+
+
+
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
+        self.sa_head = head(N_EMBED)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
@@ -51,6 +75,7 @@ class BigramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(torch.arange(T, device=DEVICE))
         x = tok_emb + pos_emb
+        x = self.sa_head(x)
         logits = self.lm_head(x)
 
         if targets is not None:
@@ -66,7 +91,10 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens):
 
         for _ in range(max_new_tokens):
-            logits, loss = self(idx)
+            
+            idx_cond = idx[:,-BLOCK_SIZE:]
+
+            logits, loss = self(idx_cond)
             logits = logits[:,-1,:]
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)
