@@ -1,7 +1,8 @@
+from timeit import default_timer as timer
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-from timeit import default_timer as timer
 
 BATCH_SIZE = 64
 BLOCK_SIZE = 256
@@ -45,42 +46,42 @@ def get_batch(split):
     return x, y
 
 
-class head(nn.Module):
-    """one head of self attention"""
-
-    def __init__(self, head_size):
+class MultipleHeadSelfAttention(nn.Module):
+    def __init__(self, num_heads):
         super().__init__()
-        self.key = nn.Linear(N_EMBED, head_size, bias=False)
-        self.query = nn.Linear(N_EMBED, head_size, bias=False)
-        self.value = nn.Linear(N_EMBED, head_size, bias=False)
-        self.register_buffer("tril", torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
-
-        self.dropout = nn.Dropout(DROPOUT)
+        self.s_attn = nn.Linear(N_EMBED, 3 * N_EMBED, bias=False)
+        self.register_buffer(
+            "tril",
+            torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)).view(
+                1, 1, BLOCK_SIZE, BLOCK_SIZE
+            ),
+        )
+        self.n_head = num_heads
+        self.proj = nn.Linear(N_EMBED, N_EMBED, bias=False)
+        self.attn_dropout = nn.Dropout(DROPOUT)
+        self.resi_dropout = nn.Dropout(DROPOUT)
 
     def forward(self, x):
         B, T, C = x.shape
-        k = self.key(x)  # (B,T,head_size)
-        q = self.query(x)  # (B,T,head_size)
 
-        wei = q @ k.transpose(-2, -1) * C**-0.5
-        wei = torch.masked_fill(wei, self.tril[:T, :T] == 0, float("-inf"))
+        q, k, v = self.s_attn(x).split(N_EMBED, dim=2)
+        k = k.view(B, T, self.n_head, C // self.n_head).transpose(
+            1, 2
+        )  # (B, nh, T, hs)
+        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+        wei = (q @ k.transpose(-2, -1)) * (k.shape[-1] ** -0.5)  # (B, nh, T, T)
+        wei = wei.masked_fill(self.tril[:, :, :T, :T] == 0, float("-inf"))
         wei = F.softmax(wei, dim=-1)
-        wei = self.dropout(wei)
+        wei = self.attn_dropout(wei)
 
-        v = self.value(x)
-        return wei @ v
+        out = wei @ v  # (B, nh, T, T) @ (B, nh, T, hs) -> (B, nh, T, hs)
+        out = out.transpose(1, 2).contiguous().view(B, T, C)
 
+        out = self.resi_dropout(self.proj(out))
 
-class MultipleSelfAttentionHead(nn.Module):
-    def __init__(self, num_heads, head_size):
-        super().__init__()
-        self.heads = nn.ModuleList([head(head_size) for _ in range(num_heads)])
-        self.proj = nn.Linear(N_EMBED, N_EMBED)
-        self.dropout = nn.Dropout(DROPOUT)
-
-    def forward(self, x):
-        out = self.proj(torch.cat([h(x) for h in self.heads], dim=-1))
-        return self.dropout(out)
+        return out
 
 
 class FeedForward(nn.Module):
@@ -98,11 +99,10 @@ class FeedForward(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, n_embed, n_head):
+    def __init__(self, n_head):
         super().__init__()
-        head_size = n_embed // n_head
-        self.sa = MultipleSelfAttentionHead(n_head, head_size)
-        self.ffwd = FeedForward(n_embed)
+        self.sa = MultipleHeadSelfAttention(n_head)
+        self.ffwd = FeedForward(N_EMBED)
         self.ln1 = nn.LayerNorm(N_EMBED)
         self.ln2 = nn.LayerNorm(N_EMBED)
 
@@ -117,9 +117,7 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
-        self.block = nn.Sequential(
-            *[Block(N_EMBED, n_head=N_HEAD) for _ in range(N_LAYER)]
-        )
+        self.block = nn.Sequential(*[Block(n_head=N_HEAD) for _ in range(N_LAYER)])
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -195,8 +193,5 @@ print(f"Time to train model : {time_end - time_start} seconds")
 
 torch.save(m.state_dict(), PATH)
 
-context = torch.zeros((1,1), dtype = torch.long, device=DEVICE)
+context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
 print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
-
-
-
