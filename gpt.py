@@ -4,6 +4,8 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from tokenizer.regexTokenizer import RegexTokenizer
+
 BATCH_SIZE = 64
 BLOCK_SIZE = 256
 MAX_ITERS = 5000
@@ -15,22 +17,20 @@ N_EMBED = 384
 N_LAYER = 6
 N_HEAD = 6
 DROPOUT = 0.2
-PATH = "gpt_model"
+PATH = "model_v2"
+VOCAB_SIZE = 256
+PATTERN = r"[A-Za-z]+(?:'[A-Za-z]+)?|[A-Za-z']+|[0-9]+|[^\sA-Za-z0-9]"
 
 torch.manual_seed(1337)
 
 with open("input.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-chars = sorted(list(set(text)))
-vocab_size = len(chars)
+tokenizer = RegexTokenizer()
+tokenizer.train(VOCAB_SIZE, text)
+print(f"RegexTokenizer training complete!")
 
-stoi = {ch: i for i, ch in enumerate(chars)}
-itos = {i: ch for i, ch in enumerate(chars)}
-encode = lambda s: [stoi[c] for c in s]
-decode = lambda l: "".join([itos[i] for i in l])
-
-data = torch.tensor(encode(text), dtype=torch.long)
+data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
 
 n = int(0.9 * len(data))
 train_data = data[:n]
@@ -115,10 +115,10 @@ class Block(nn.Module):
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
+        self.token_embedding_table = nn.Embedding(VOCAB_SIZE, N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
         self.block = nn.Sequential(*[Block(n_head=N_HEAD) for _ in range(N_LAYER)])
-        self.lm_head = nn.Linear(N_EMBED, vocab_size)
+        self.lm_head = nn.Linear(N_EMBED, VOCAB_SIZE)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
@@ -194,4 +194,4 @@ print(f"Time to train model : {time_end - time_start} seconds")
 torch.save(m.state_dict(), PATH)
 
 context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
-print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
+print(tokenizer.decode(m.generate(context, max_new_tokens=500)[0].tolist()))

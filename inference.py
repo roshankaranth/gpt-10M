@@ -3,6 +3,8 @@ import torch.nn as nn
 from torch.nn import functional as F
 from timeit import default_timer as timer
 
+from tokenizer.regexTokenizer import RegexTokenizer
+
 BATCH_SIZE = 64
 BLOCK_SIZE = 256
 MAX_ITERS = 5000
@@ -15,22 +17,22 @@ N_LAYER = 6
 N_HEAD = 6
 DROPOUT = 0.2
 MODEL_PATH = "model_v1"
-FILE_PATH = "output.txt"
+FILE_PATH = "output_2.txt"
+VOCAB_SIZE = 256
+PATTERN = r"[A-Za-z]+(?:'[A-Za-z]+)?|[A-Za-z']+|[0-9]+|[^\sA-Za-z0-9]"
+
 
 torch.manual_seed(1337)
 
 with open("input.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
-chars = sorted(list(set(text)))
-vocab_size = len(chars)
 
-stoi = {ch: i for i, ch in enumerate(chars)}
-itos = {i: ch for i, ch in enumerate(chars)}
-encode = lambda s: [stoi[c] for c in s]
-decode = lambda l: "".join([itos[i] for i in l])
+tokenizer = RegexTokenizer()
+tokenizer.train(VOCAB_SIZE, text)
+print(f"RegexTokenizer training complete!")
 
-data = torch.tensor(encode(text), dtype=torch.long)
+data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
 
 n = int(0.9 * len(data))
 train_data = data[:n]
@@ -116,12 +118,12 @@ class Block(nn.Module):
 class BigramLanguageModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.token_embedding_table = nn.Embedding(vocab_size, N_EMBED)
+        self.token_embedding_table = nn.Embedding(VOCAB_SIZE, N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
         self.block = nn.Sequential(
             *[Block(N_EMBED, n_head=N_HEAD) for _ in range(N_LAYER)]
         )
-        self.lm_head = nn.Linear(N_EMBED, vocab_size)
+        self.lm_head = nn.Linear(N_EMBED, VOCAB_SIZE)
 
     def forward(self, idx, targets=None):
         B, T = idx.shape
@@ -162,7 +164,7 @@ context = torch.zeros((1,1), dtype = torch.long, device=DEVICE)
 
 time_start = timer()
 
-model_output = decode(loaded_model.generate(context, max_new_tokens=10000)[0].tolist())
+model_output = tokenizer.decode(loaded_model.generate(context, max_new_tokens=10000)[0].tolist())
 
 time_end = timer()
 
