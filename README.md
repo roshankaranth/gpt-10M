@@ -1,0 +1,1 @@
+10M language model based on decoder only transformer, includes Byte level, Regex and GPT-4 tokenizer. Also implemented KV caching and Rotart positional embeddings. Bugs in integrating the two. 
