@@ -11,11 +11,12 @@ N_EMBED = 384
 N_LAYER = 6
 N_HEAD = 6
 DROPOUT = 0.2
-MODEL_PATH = "model_v2"
-FILE_PATH = "output_3.txt"
+MODEL_PATH = "model_v1"
+FILE_PATH = "output.txt"
 VOCAB_SIZE = 256
 PATTERN = r"[A-Za-z]+(?:'[A-Za-z]+)?|[A-Za-z']+|[0-9]+|[^\sA-Za-z0-9]"
 MAX_NEW_TOKENS = 10000
+MAX_SEQ_LEN = BLOCK_SIZE + MAX_NEW_TOKENS
 
 torch.manual_seed(1337)
 
@@ -64,7 +65,7 @@ class MultipleHeadSelfAttention(nn.Module):
         self.attn_dropout = nn.Dropout(DROPOUT)
         self.resi_dropout = nn.Dropout(DROPOUT)
         head_dim = N_EMBED // num_heads
-        self.register_buffer("rope_embeds", precompute_rope_embeddings(head_dim, BLOCK_SIZE),persistent=False)
+        self.register_buffer("rope_embeds", precompute_rope_embeddings(head_dim, MAX_SEQ_LEN),persistent=False)
 
     def forward(self, x, past_kv = None):
         B, T, C = x.shape #BATCH_SIZE, BLOCK_SIZE, N_EMBED | (during generation (1, 1, N_EMBED))
@@ -79,10 +80,6 @@ class MultipleHeadSelfAttention(nn.Module):
         else:
             past_k, past_v = past_kv
             past_len = past_k.shape[-2]
-
-        max_offset = BLOCK_SIZE - T
-        if past_len > max_offset:
-            past_len = max_offset
 
         q = apply_rotary_pos_emb(q, self.rope_embeds, offset=past_len)
         k = apply_rotary_pos_emb(k, self.rope_embeds, offset=past_len)
@@ -182,9 +179,10 @@ class GPT(nn.Module):
         logits,_,kv_cache = self(idx, kv_cache = kv_cache) #prefilling the cache
         for _ in range(max_new_tokens):
 
-            idx_cond = idx[:, -1:]
+            idx_cond = idx[:, -BLOCK_SIZE:]
+            # idx_cond = idx[:, -1:]
 
-            logits,_,kv_cache = self(idx_cond, kv_cache = kv_cache)
+            logits,_,kv_cache = self(idx_cond, kv_cache = None)
             logits = logits[:, -1, :]
             probs = F.softmax(logits, dim=-1)
             idx_next = torch.multinomial(probs, num_samples=1)

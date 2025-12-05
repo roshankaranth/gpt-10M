@@ -17,7 +17,7 @@ N_EMBED = 384 #Embedding dimension
 N_LAYER = 6 #Number of decoder blocks
 N_HEAD = 6  #Number of Attention heads
 DROPOUT = 0.2
-PATH = "model_v2"
+PATH = "model_v1"
 VOCAB_SIZE = 256 #Vocab size of tokenizer
 PATTERN = r"[A-Za-z]+(?:'[A-Za-z]+)?|[A-Za-z']+|[0-9]+|[^\sA-Za-z0-9]"
 #The patten at this point does not really effect the outcome of the tokenizer as the tokenizer has a vocab if 256,
